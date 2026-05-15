@@ -1,0 +1,426 @@
+@app.route('/')
+def index():
+    global USER_IPS, USER_ACTIVITY, USER_CHANNELS, USER_COUNTRIES, LIVE_TERMINAL_LOGS, SERVER_VOTES, LIVE_BANS, TEMPORARY_BANS
+    cur_t = time.time()
+    total_server_hits = sum(USER_ACTIVITY.values()) if USER_ACTIVITY else 0
+
+    # === АВТОМАТИЧЕСКИЙ ПОДСЧЕТ АКТИВНОСТИ ТЕМ ТЕЛЕГРАМ ===
+    topic_weights = {"chat": 1, "movies": 0, "iptv": 0}
+    rows = ""
+    sorted_users = sorted(USER_ACTIVITY.items(), key=lambda x: x[1], reverse=True)
+    
+    for i, (name, count) in enumerate(sorted_users[:10], 1):
+        if count == 0: continue
+        user_ips_dict = USER_IPS.get(name, {})
+        last_ts = max(user_ips_dict.values()) if isinstance(user_ips_dict, dict) and user_ips_dict else 0
+        time_passed = cur_t - last_ts
+        
+        status_dot = "<span class='dot dot-green'></span>" if last_ts > 0 and time_passed <= 60 else "<span class='dot dot-gray'></span>"
+        flag = USER_COUNTRIES.get(name, "🌐")
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "👤"
+        masked_name = name[:2] + "*" * (len(name) - 2) if len(name) > 2 else name + "**"
+        now_watching = USER_CHANNELS.get(name, "🌐 Сессия активна")
+
+        # Ювелирно вытаскиваем плеер текущего активного юзера
+        # (Предполагается, что вы сохраняете лог UA в глобальный словарь USER_UA аналогично USER_IPS)
+        # Если словаря USER_UA нет, скрипт безопасно выведет базовый статус
+        try:
+            user_ua_string = USER_UA.get(name, "")
+            client_player = get_clean_ua(user_ua_string)
+        except:
+            client_player = "🔌 Нарушений нет"
+
+        if "📺" in now_watching:
+            ch_lower = now_watching.lower()
+            if any(w in ch_lower for w in ["hd", "cinema", "кино", "фильм", "drama", "hit", "bollywood"]):
+                topic_weights["movies"] += 2
+            else:
+                topic_weights["iptv"] += 1
+
+        # Изменили вывод: теперь под ником зрителя пишется его плеер мелким шрифтом
+        # Умный подбор текста для компактного бейджа плеера
+        ua_lower = client_player.lower() if client_player else ""
+        if "televizo" in ua_lower:
+            ua_badge_text = "Televizo App"
+        elif "vlc" in ua_lower:
+            ua_badge_text = "VLC Player"
+        else:
+            ua_badge_text = client_player[:12] if client_player else "IPTV Плеер"
+
+        # Сборка компактной плитки-кнопки (Вставляется СТРОГО вместо rows += f"<tr>...</tr>")
+        rows += f"""
+        <div style="background: rgba(30, 41, 59, 0.4); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 5px; width: 220px; min-width: 220px; box-sizing: border-box; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);" 
+             onmouseover="this.style.border='1px solid #22c55e'; this.style.background='rgba(30, 41, 59, 0.7)'; this.style.transform='translateY(-2px)';" 
+             onmouseout="this.style.border='1px solid rgba(255, 255, 255, 0.08)'; this.style.background='rgba(30, 41, 59, 0.4)'; this.style.transform='translateY(0px)';">
+            
+            <!-- Верхний ряд плитки: Имя и Хиты -->
+            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 11px; filter: drop-shadow(0 0 4px #22c55e);">{status_dot}</span>
+                    <strong style="color: #f8fafc; font-size: 13px; letter-spacing: 0.3px;">{medal}{flag}{masked_name}</strong>
+                </div>
+                <!-- ХИТЫ (Круглый синий бейдж) -->
+                <div style="background: linear-gradient(135deg, #1e40af, #3b82f6); color: #fff; font-size: 10px; font-weight: bold; width: 22px; height: 18px; border-radius: 10px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 6px rgba(59, 130, 246, 0.4); border: 1px solid rgba(255,255,255,0.1);">
+                    {count}
+                </div>
+            </div>
+
+            <!-- Средний ряд плитки: Название канала -->
+            <div style="color: #e2e8f0; font-size: 12px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 0; border-top: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.04); width: 100%;">
+                {now_watching}
+            </div>
+
+            <!-- Нижня часть плитки: Компактный бейдж плеера -->
+            <div style="display: flex; align-items: center; justify-content: flex-start; margin-top: 2px;">
+                <span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 1px 5px; border-radius: 4px; font-size: 9px; font-weight: bold; letter-spacing: 0.3px;">
+                    📱 {ua_badge_text}
+                </span>
+            </div>
+
+        </div>
+        """
+
+    topics_list = [
+        {"id": "chat", "title": "💥 1. 𝐓𝐯𝐙𝐚𝐓𝐚𝐤💥", "url": "https://t.me/c/3067672494/4048", "score": topic_weights["chat"]},
+        {"id": "iptv", "title": "⚙️ 2. 𝐇𝐎𝐑𝐒𝐓 𝐅𝐑𝐈𝐂𝐊", "url": "https://t.me/c/3067672494/9", "score": topic_weights["iptv"]},
+        {"id": "reviews", "title": "🎬  3. E n d i k Т в", "url": "https://t.me/c/3067672494/26", "score": topic_weights["movies"]}
+    ]
+    sorted_topics = sorted(topics_list, key=lambda x: x["score"], reverse=True)
+
+    topics_html = ""
+    for idx, top in enumerate(sorted_topics, 1):
+        top_badge = "<span style='background:#ef4444; color:#fff; font-size:10px; padding:2px 6px; border-radius:6px; margin-left:8px; font-weight:bold; box-shadow:0 0 8px #ef4444;'>🔥 В ТОПЕ СЕГОДНЯ</span>" if idx == 1 else ""
+        topics_html += f"""
+        <div style='display: flex; justify-content: space-between; align-items: center; font-size: 0.88em; padding: 8px 0; border-bottom: 1px dashed #1f2937;'>
+            <span><b>{idx}.</b> {top['title']} {top_badge}</span>
+            <a href='{top['url']}' target='_blank' style='color: #38bdf8; text-decoration: none; font-weight: bold;'>Перейти →</a>
+        </div>
+        """
+
+    terminal_html = "".join([f"<div class='terminal-line'>⚡ {log}</div>" for log in LIVE_TERMINAL_LOGS]) if LIVE_TERMINAL_LOGS else "<div style='color:#475569; text-align:center;'>📜 Ожидание сетевой активности клиентов...</div>"
+
+    # === ФОРМИРОВАНИЕ ПЕРВИЧНОЙ ТАБЛИЦЫ БАНОВ ===
+    multiroom_bans_html = ""
+    for banned_user, info in list(LIVE_BANS.items()):
+        remaining = int(TEMPORARY_BANS.get(banned_user, 0) - cur_t)
+        if remaining <= 0:
+            LIVE_BANS.pop(banned_user, None)
+            TEMPORARY_BANS.pop(banned_user, None)
+            continue
+        m, s = divmod(remaining, 60)
+        time_left = f"{m}м {s}с"
+        masked_ban_name = banned_user[:3] + "***" if len(banned_user) > 3 else banned_user + "***"
+        raw_ua = info.get("ua", "") if isinstance(info, dict) else ""
+        clean_player = get_clean_ua(raw_ua)
+        
+        multiroom_bans_html += f"""
+        <div style="background: rgba(255, 0, 0, 0.12); border: 2px solid #ff3333; padding: 10px 15px; border-radius: 14px; margin-bottom: 8px; box-shadow: 0 0 15px rgba(255, 51, 51, 0.2); width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div style="color: #ff4444; font-weight: bold; font-size: 0.9em;">🚨 Ник: <span style="color: #fff; font-family: monospace; font-size: 1.1em;">{masked_ban_name}</span> БАН ЗА 2 УСТРОЙСТВА</div>
+                <div style="color: #ff9900; font-weight: bold; font-family: monospace; font-size: 0.95em;">⏳ {time_left}</div>
+            </div>
+            <div style="font-size: 0.82em; color: #94a3b8; border-top: 1px dashed rgba(255,51,51,0.2); padding-top: 4px; text-align: left;">
+                📱 Используемый плеер: <span style="color: #f8fafc; font-weight: bold;">{clean_player}</span>
+            </div>
+        </div>
+        """
+    # === Подготовка данных для главного монитора ===
+    violations_count = {}
+    violation_history = []
+
+    if total_server_hits == 0:
+        pulse_status = "<span style='color: #64748b;'>🔘 Сервер спит</span>"
+    elif total_server_hits < 100:
+        pulse_status = "<span style='color: #22c55e;'>🟢 Все отлично</span>"
+    elif total_server_hits < 500:
+        pulse_status = "<span style='color: #fbbf24;'>🟡 Пошла жара</span>"
+    else:
+        pulse_status = "<span style='color: #ef4444;'>🔴 Напряг для барыг</span>"
+    
+    total_violators = get_total_violations_count()
+
+    return render_template_string("""
+    <html>
+        <head>
+            <meta charset="utf-8">
+            <title>🛸 Монитор TvZaTak 🛸</title>
+            <style>
+                body { background: #0b0f19; color: #f8fafc; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px 10px; margin: 0; }
+                .card { background: #111827; padding: 20px; border-radius: 24px; box-shadow: 0 0 40px rgba(56, 189, 248, 0.15); width: 100%; max-width: 600px; border: 1px solid #1f2937; box-sizing: border-box; display: flex; flex-direction: column; gap: 15px; }
+                
+                .title-box { text-align: center; padding: 8px 15px; border-radius: 14px; background: #030712; border: 2px solid #00ffcc; box-shadow: 0 0 15px rgba(0, 255, 204, 0.2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 100%; box-sizing: border-box; transition: all 0.4s ease; }
+                .title-box h1 { margin: 0; font-size: 1.35em; font-weight: 800; width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; line-height: 1.2; color: #f8fafc; }
+                
+                .title-alarm { border-color: #ff3333 !important; box-shadow: 0 0 25px rgba(255, 51, 51, 0.6) !important; background: rgba(255, 0, 0, 0.05) !important; }
+                
+                @keyframes lightning-flash { 0% { left: -40px; } 100% { left: 100%; } }
+                
+				table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+				th { text-align: left; color: #64748b; font-size: 0.8em; text-transform: uppercase; letter-spacing: 1px; padding: 8px 5px; border-bottom: 2px solid #1f2937; }
+				td { padding: 10px 8px; border-bottom: 1px solid rgba(56, 189, 248, 0.1); border-right: 1px solid rgba(56, 189, 248, 0.05); font-size: 0.9em; }
+				td:last-child { border-right: none; }
+                
+                .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+                .dot-green { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+                .dot-gray { background: #4b5563; }
+                .count { background: #1e3a8a; color: #38bdf8; padding: 2px 8px; border-radius: 8px; font-weight: bold; font-size: 0.85em; font-family: monospace; }
+                .terminal-box { background: #030712; border-radius: 14px; padding: 12px; border: 1px solid #1f2937; font-family: monospace; font-size: 11px; box-shadow: inset 0 0 15px rgba(0,0,0,0.6); width: 100%; box-sizing: border-box; }
+                .terminal-box h3 { margin: 0 0 8px 0; font-size: 10px; color: #a855f7; text-transform: uppercase; letter-spacing: 1px; }
+                .terminal-line { color: #38bdf8; padding: 3px 0; border-bottom: 1px solid #070a12; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                .back-btn { display: block; text-align: center; padding: 12px; background: #1f2937; color: #94a3b8; text-decoration: none; font-size: 13px; font-weight: bold; border-radius: 12px; border: 1px solid #374151; width: 100%; box-sizing: border-box; transition: all 0.2s; }
+                .back-btn:hover { background: #2563eb; color: #fff; border-color: #38bdf8; box-shadow: 0 0 15px rgba(37,99,235,0.4); }
+                .joke-box { background: #070a12; padding: 12px 15px; border-radius: 14px; border: 1px dashed #334155; box-style: italic; line-height: 1.4; font-size: 0.9em; color: #cbd5e1; text-align: left; width: 100%; box-sizing: border-box; }
+            </style>
+            <script>
+                async function refreshLiveData() {
+                    try {
+                        let res = await fetch('/api_live_data');
+                        let data = await res.json();
+                        if (data.terminal) document.getElementById('terminal_body').innerHTML = data.terminal;
+                        if (data.iptv_rows) document.getElementById('iptv_body').innerHTML = data.iptv_rows;
+                        if (data.current_joke) document.getElementById('joke_body').innerHTML = data.current_joke;
+                        if (data.total_hits !== undefined) document.getElementById('total_hits_span').innerText = data.total_hits;
+                        if (data.pulse_status) document.getElementById('server_pulse_span').innerHTML = data.pulse_status;
+                        
+                        if (data.multiroom_bans_html !== undefined) {
+                            document.getElementById('live_bans_container').innerHTML = data.multiroom_bans_html;
+                        }
+                        // УПРАВЛЕНИЕ АВТОМАТИЧЕСКИМ ПЕРЕВОРОТОМ ШАПКИ НА ЛЕТУ
+                        let titleBox = document.getElementById('main_title_box');
+                        let titleText = document.getElementById('main_title_text');
+                        
+                        if (data.has_active_bans) {
+                            titleBox.className = "title-box title-alarm";
+                            titleText.innerHTML = `
+                                <span style="white-space: nowrap; color: #ff3333; text-shadow: 0 0 8px #ff3333; font-weight: 800;">🚨 ОБНАРУЖЕН ПЕРЕХВАТ</span>
+                                <div style="display: flex; align-items: center; justify-content: center; position: relative; flex: 1; max-width: 120px; min-width: 60px; height: 20px; overflow: hidden;">
+                                    <div style="position: relative; flex: 1; height: 2px; background: linear-gradient(to right, transparent, #ff3333); opacity: 0.7; overflow: hidden; display: flex; align-items: center;"><div style="position: absolute; width: 40px; height: 3px; background: #fff; box-shadow: 0 0 10px #ff3333; animation: lightning-flash 1.2s infinite linear;"></div></div>
+                                    <div style="font-size: 18px; color: #ff3333; text-shadow: 0 0 10px #ff3333, 0 0 20px #ff3333; margin: 0 8px; z-index: 10;">⚡</div>
+                                    <div style="position: relative; flex: 1; height: 2px; background: linear-gradient(to left, transparent, #ff3333); opacity: 0.7; overflow: hidden; display: flex; align-items: center;"><div style="position: absolute; width: 40px; height: 3px; background: #fff; box-shadow: 0 0 10px #ff3333; animation: lightning-flash 1.2s infinite linear;"></div></div>
+                                </div>
+                                <span style="white-space: nowrap; color: #ff3333; text-shadow: 0 0 8px #ff3333; font-weight: 800;">ПЕРЕХВАТ 🚨</span>
+                            `;
+                        } else {
+                            titleBox.className = "title-box";
+                            titleText.innerHTML = `
+                                <span style="white-space: nowrap;">🛸 Монитор</span>
+                                <div style="display: flex; align-items: center; justify-content: center; position: relative; flex: 1; max-width: 120px; min-width: 60px; height: 20px; overflow: hidden;">
+                                    <div style="position: relative; flex: 1; height: 2px; background: linear-gradient(to right, transparent, #00ffcc); opacity: 0.7; overflow: hidden; display: flex; align-items: center;"><div style="position: absolute; width: 40px; height: 3px; background: #fff; box-shadow: 0 0 10px #00ffcc; animation: lightning-flash 1.2s infinite linear;"></div></div>
+                                    <div style="font-size: 18px; color: #00ffcc; text-shadow: 0 0 10px #00ffcc, 0 0 20px #00ffcc; margin: 0 8px; z-index: 10;">⚡</div>
+                                    <div style="position: relative; flex: 1; height: 2px; background: linear-gradient(to left, transparent, #00ffcc); opacity: 0.7; overflow: hidden; display: flex; align-items: center;"><div style="position: absolute; width: 40px; height: 3px; background: #fff; box-shadow: 0 0 10px #00ffcc; animation: lightning-flash 1.2s infinite linear;"></div></div>
+                                </div>
+                                <span style="white-space: nowrap;">TvZaTak 🛸</span>
+                            `;
+                        }
+                        if (data.votes) {
+                            document.getElementById('v_good').innerText = data.votes.good || 0;
+                            document.getElementById('v_neutral').innerText = data.votes.neutral || 0;
+                            document.getElementById('v_bad').innerText = data.votes.bad || 0;
+                        }
+                    } catch (e) { console.error(e); }
+                }
+				async function sendServerVote(type) {
+					// 1. Проверяем, есть ли уже вечная метка в браузере пользователя
+					if (localStorage.getItem('tv_voted') === 'true') {
+						alert('Вы уже проголосовали! Повторный голос не принимается.');
+						return;
+					}
+					try {
+						// Отправляем обычный GET запрос на правильный роут
+						let res = await fetch('/vote_server/' + type);
+						let data = await res.json();
+						if (data && data.good !== undefined) {
+							document.getElementById('v_good').innerText = data.good || 0;
+							document.getElementById('v_neutral').innerText = data.neutral || 0;
+							document.getElementById('v_bad').innerText = data.bad || 0;
+							
+							// 2. Ставим вечную метку в браузер сразу после успешного клика
+							localStorage.setItem('tv_voted', 'true');
+						}
+					} catch (e) {
+						console.error("Ошибка голосования:", e);
+					}
+				}
+                setInterval(refreshLiveData, 20000);
+            </script>
+        </head>
+        <body>
+            <div class="card">
+                
+                <!-- ШАПКА МОНИТОРА С ВСТРОЕННЫМ ЛАЗЕРОМ -->
+                <div id="main_title_box" class="title-box">
+                    <div style="text-align: center; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; line-height: 1.2;">
+                        📊 СТАТУС: <span id="server_pulse_span">{{ pulse_status|safe }}</span>
+                    </div>
+                    <h1 id="main_title_text">
+                        <span style="white-space: nowrap;">🛸 Монитор</span>
+                        <div style="display: flex; align-items: center; justify-content: center; position: relative; flex: 1; max-width: 120px; min-width: 60px; height: 20px; overflow: hidden;">
+                            <div style="position: relative; flex: 1; height: 2px; background: linear-gradient(to right, transparent, #00ffcc); opacity: 0.7; overflow: hidden; display: flex; align-items: center;"><div style="position: absolute; width: 40px; height: 3px; background: #fff; box-shadow: 0 0 10px #00ffcc; animation: lightning-flash 1.2s infinite linear;"></div></div>
+                            <div style="font-size: 18px; color: #00ffcc; text-shadow: 0 0 10px #00ffcc, 0 0 20px #00ffcc; margin: 0 8px; z-index: 10;">⚡</div>
+                            <div style="position: relative; flex: 1; height: 2px; background: linear-gradient(to left, transparent, #00ffcc); opacity: 0.7; overflow: hidden; display: flex; align-items: center;"><div style="position: absolute; width: 40px; height: 3px; background: #fff; box-shadow: 0 0 10px #00ffcc; animation: lightning-flash 1.2s infinite linear;"></div></div>
+                        </div>
+                        <span style="white-space: nowrap;">TvZaTak 🛸</span>
+                    </h1>
+                <!-- ЖИВОЙ КОНТЕЙНЕР АКТИВНЫХ БАНОВ ПЛЕЕРОВ -->
+                <div id="live_bans_container" style="width: 100%;">
+                    {{ multiroom_bans_html|safe }}
+                </div>
+				<!-- БЛОК ПЛИТОК АКТИВНЫХ ЗРИТЕЛЕЙ В СТРОЧКУ -->
+				<div style="margin-bottom: 20px;">
+					<div style="margin-bottom: 12px; font-size: 0.85em; font-weight: bold; color: #a855f7; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">
+						🔥 Зрители в TvZaTak
+					</div>
+					
+					<!-- СЕТКА ДЛЯ КНОПОК: автоматическое выравнивание в строчку -->
+					<div id="iptv_body" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; width: 100%;">
+						{% if rows %}
+							{{ rows|safe }}
+						{% else %}
+							<div style="grid-column: 1/-1; text-align: center; color: #4b5563; padding: 20px; background: rgba(30, 41, 59, 0.2); border: 1px dashed rgba(255, 255, 255, 0.05); border-radius: 8px; font-size: 13px;">
+								📡 В данный момент трансляцию никто не смотрит...
+							</div>
+						{% endif %}
+					</div>
+				</div>
+				</div>
+                </div>
+                <!-- ЖИВОЙ СЕТЕВОЙ ПРОТОКОЛ -->
+                <div class="terminal-box">
+                    <h3>📟 Живой сетевой протокол (События)</h3>
+                    <div id="terminal_body">{{ terminal_html|safe }}</div>
+                </div>
+                <!-- КИБЕР-БЛОК ЛАЙКОВ IPTV СЕРВЕРА -->
+                <div style="background: #070a12; border-radius: 14px; padding: 12px 15px; border: 1px solid #1f2937; text-align: center; width: 100%; box-sizing: border-box;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 0.85em; color: #38bdf8; text-transform: uppercase; letter-spacing: 1px;">👍 ОЦЕНИ Бесплатный TvZaTak</h3>
+                    <div style="display: flex; justify-content: space-around; align-items: center; gap: 10px;">
+                        <button onclick="sendServerVote('good')" style="flex: 1; background: #14532d; color: #22c55e; border: 1px solid #22c55e; padding: 8px 5px; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 12px;">🔥 ОГОНЬ (<span id="v_good">{{ votes_snapshot.good }}</span>)</button>
+                        <button onclick="sendServerVote('neutral')" style="flex: 1; background: #78350f; color: #fbbf24; border: 1px solid #fbbf24; padding: 8px 5px; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 12px;">😐 ТАК СЕБЕ (<span id="v_neutral">{{ votes_snapshot.neutral }}</span>)</button>
+                        <button onclick="sendServerVote('bad')" style="flex: 1; background: #7f1d1d; color: #ef4444; border: 1px solid #ef4444; padding: 8px 5px; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 12px;">💩 ЗАТЫК (<span id="v_bad">{{ votes_snapshot.bad }}</span>)</button>
+                    </div>
+                </div>
+                <!-- РЕЙТИНГ АКТИВНОСТИ ЧАТА -->
+                <div style="background: #070a12; border-radius: 14px; padding: 15px; border: 1px solid #1f2937; width: 100%; box-sizing: border-box;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 0.85em; color: #fbbf24; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #1f2937; padding-bottom: 5px;">
+                        🔥 Рейтинг чата 📡𝓧𝓪Ль𝓑🇦📡
+                    </h3>
+                    {{ topics_html|safe }}
+                </div>
+                <!-- СУТОЧНАЯ НАГРУЗКА -->
+                <div style="background: #030712; padding: 12px; border-radius: 12px; text-align: center; border: 1px solid #334155; font-size: 0.85em; font-weight: bold; color: #38bdf8; text-shadow: 0 0 8px rgba(56,189,248,0.4); width: 100%; box-sizing: border-box;">
+                    📊 ОБЩАЯ СУТОЧНАЯ НАГРУЗКА: <span id="total_hits_span" style="color: #fff; font-family: monospace; font-size: 1.2em;">{{ total_hits }}</span> КЛИКОВ
+                </div>
+                <!-- КНОПКА ВОЗВРАТА -->
+                <a href="https://t.me/+2lWVU6CKQsVkMWRi" class="back-btn">💥Вступить в группу TvZaTak💥</a>
+            </div>
+        </body>
+    </html>
+    """, rows=rows, terminal_html=terminal_html, total_hits=total_server_hits, topics_html=topics_html, current_joke="", pulse_status=pulse_status, votes_snapshot=SERVER_VOTES, multiroom_bans_html=multiroom_bans_html, total_violators=total_violators)
+
+@app.route('/api_live_data')
+def api_live_data():
+    global USER_ACTIVITY, USER_CHANNELS, USER_COUNTRIES, USER_IPS, LIVE_TERMINAL_LOGS, SERVER_VOTES, LIVE_BANS, TEMPORARY_BANS, USER_AGENTS
+    cur_t = time.time()
+
+    def _clean_ua_processor(ua_string):
+        if not ua_string: return "Неизвестный плеер (Взлом)"
+        ua_lower = ua_string.lower()
+        if "potplayer" in ua_lower: return "💻 PotPlayer"
+        if "tivimate" in ua_lower: return "📺 TiviMate Premium"
+        if "navigator" in ua_lower or ("android" in ua_lower and "ott" in ua_lower): return "📱 OTT Navigator"
+        if "clatest" in ua_lower or "iptv" in ua_lower: return "📡 IPTV Player"
+        if "vlc" in ua_lower: return "💻 VLC Media Player"
+        if "televizo" in ua_lower: return "📺 Televizo App"
+        if "siptv" in ua_lower: return "🖥️ Smart IPTV (LG/Samsung)"
+        if "ssiptv" in ua_lower: return "🖥️ SS IPTV"
+        return f"🔌 {ua_string[:20]}..."
+
+    globals()['get_clean_ua'] = _clean_ua_processor
+
+    rows = ""
+    sorted_users = sorted(USER_ACTIVITY.items(), key=lambda x: x[1], reverse=True)
+    for i, (name, count) in enumerate(sorted_users[:10], 1):
+        if count == 0: continue
+        user_ips_dict = USER_IPS.get(name, {})
+        
+        # === ЧИСТЫЙ ЖИВОЙ СТАТУС БЕЗ ЗАПИСИ НА ДИСК ===
+        if name in LIVE_BANS:
+            ban_status_html = "<span style='font-size: 0.76em; color: #ef4444; font-weight: bold; animation: alarm-pulse 0.8s infinite alternate;'>🚨 ПЕРЕХВАЧЕН ПРЯМО СЕЙЧАС!</span>"
+        else:
+            ban_status_html = "<span style='font-size: 0.76em; color: #22c55e; font-weight: 500;'>🟢 Нарушений нет</span>"
+
+        last_ts = max(user_ips_dict.values()) if isinstance(user_ips_dict, dict) and user_ips_dict else 0
+        status_dot = "<span class='dot dot-green'></span>" if cur_t - last_ts <= 60 else "<span class='dot dot-gray'></span>"
+        flag = USER_COUNTRIES.get(name, "🌐")
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "👤"
+        masked_name = name[:2] + "*" * (len(name) - 2) if len(name) > 2 else name + "**"
+        now_watching = USER_CHANNELS.get(name, "🌐 Сессия active")
+        
+        raw_ua = USER_AGENTS.get(name, "") if 'USER_AGENTS' in globals() else ""
+        clean_viewer_player = _clean_ua_processor(raw_ua)
+
+        rows += f"""<tr>
+            <td style='padding: 10px 8px; text-align: left; display: flex; flex-direction: column; gap: 2px;'>
+                <div style='display: flex; align-items: center; gap: 4px;'>{status_dot} {medal} {flag} <span style='font-weight: bold;'>{masked_name}</span></div>
+                <div style='padding-left: 24px; line-height: 1.1;'>{ban_status_html}</div>
+            </td>
+            <td style='padding: 10px 8px; text-align: left;'>
+                <div style='display: flex; flex-direction: column; gap: 2px;'>
+                    <span>{now_watching}</span>
+                    <span style='font-size: 0.78em; color: #64748b; font-weight: 500;'>{clean_viewer_player}</span>
+                </div>
+            </td>
+            <td style='padding: 10px 8px; text-align: center;'><span class='count'>{count}</span></td>
+        </tr>"""
+
+    terminal_html = "".join([f"<div class='terminal-line'>{log}</div>" for log in LIVE_TERMINAL_LOGS]) if LIVE_TERMINAL_LOGS else "<div style='color:#475569; text-align:center;'>📜 Ожидание событий...</div>"
+    total_server_hits = sum(USER_ACTIVITY.values()) if USER_ACTIVITY else 0
+
+    multiroom_bans_html = ""
+    for banned_user, info in list(LIVE_BANS.items()):
+        remaining = int(TEMPORARY_BANS.get(banned_user, 0) - cur_t)
+        if remaining <= 0:
+            LIVE_BANS.pop(banned_user, None)
+            TEMPORARY_BANS.pop(banned_user, None)
+            continue
+        m, s = divmod(remaining, 60)
+        time_left = f"{m}м {s}с"
+        masked_ban_name = banned_user[:3] + "***" if len(banned_user) > 3 else banned_user + "***"
+        
+        raw_ua = info.get("ua", "") if isinstance(info, dict) else ""
+        clean_player = _clean_ua_processor(raw_ua)
+        
+        multiroom_bans_html += f"""
+        <div style="background: rgba(255, 0, 0, 0.12); border: 2px solid #ff3333; padding: 10px 15px; border-radius: 14px; margin-bottom: 8px; box-shadow: 0 0 15px rgba(255, 51, 51, 0.2); width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div style="color: #ff4444; font-weight: bold; font-size: 0.9em;">🚨 Ник: <span style="color: #fff; font-family: monospace; font-size: 1.1em;">{masked_ban_name}</span> БАН ЗА 2 УСТРОЙСТВА</div>
+                <div style="color: #ff9900; font-weight: bold; font-family: monospace; font-size: 0.95em;">⏳ {time_left}</div>
+            </div>
+            <div style="font-size: 0.82em; color: #94a3b8; border-top: 1px dashed rgba(255,51,51,0.2); padding-top: 4px; text-align: left;">
+                📱 Используемый плеер: <span style="color: #f8fafc; font-weight: bold;">{clean_player}</span>
+            </div>
+        </div>
+        """
+    total_violators = get_total_violations_count()
+
+    # Логика определения статуса пульса сервера
+    # === ОПРЕДЕЛЕНИЕ СТАТУСА ПУЛЬСА СЕРВЕРА ===
+    if total_server_hits == 0:
+        pulse_status = "<span style='color: #64748b;'>⚪ Сервер спит</span>"
+    elif total_server_hits < 100:
+        pulse_status = "<span style='color: #22c55e;'>🟢 Все отлично</span>"
+    elif total_server_hits < 500:
+        pulse_status = "<span style='color: #fbbf24;'>🟡 Пошла жара</span>"
+    else:
+        pulse_status = "<span style='color: #ef4444;'>🔴 Напряг для барыг</span>"
+
+    # === СТАБИЛЬНЫЙ ОТВЕТ ДЛЯ АВТООБНОВЛЕНИЯ (БЕЗ ОБЛАКА) ===
+    return jsonify({
+        "iptv_rows": rows,
+        "terminal": terminal_html,
+        "current_joke": str(get_total_violations_count()),
+        "pulse_status": pulse_status,
+        "total_hits": total_server_hits,
+        "votes": SERVER_VOTES,
+        "multiroom_bans_html": multiroom_bans_html,
+        "has_active_bans": bool(LIVE_BANS)
+    })
