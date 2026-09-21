@@ -3,7 +3,7 @@ import json
 import os
 import time
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 import requests
 
 PORTAL_URL = "http://app.ttt5.me/stalker_portal/server/load.php"
@@ -80,9 +80,6 @@ def get_session():
 
 def fetch_channels_data(session):
     channels = []
-    seen_cmds = set()
-
-    # Faqat bitta asosiy сўров орқали каналларни олиш (таймаутни олдини олиш учун)
     try:
         channels_url = f"{PORTAL_URL}?type=itv&action=get_all_channels&JsHttpRequest=1-xml"
         channels_res = session.get(channels_url, timeout=8).json()
@@ -178,7 +175,7 @@ def admin_panel():
     <body>
         <div class="card">
             <h2>🚀 IPTV Proxy Admin Panel</h2>
-            <p>Holati: <span class="badge">Ishlayapti ✅</span></p>
+            <p>Holati: <span class="badge">Ishlayapti ✅ (Proxy Mode)</span></p>
             <p><b>Kanallar soni:</b> {total} ta</p>
             <hr style="border: 0.5px solid #334155; margin: 20px 0;">
             <a href="/pl.m3u8" target="_blank">📥 M3U Playlist (/pl.m3u8)</a>
@@ -233,7 +230,7 @@ def download_m3u8(request: Request):
     return "\n".join(m3u_lines)
 
 @app.get("/stream/{index}")
-def proxy_stream(index: int):
+def proxy_stream(index: int, request: Request):
     if not os.path.exists(PLAYLIST_FILE):
         return Response("Playlist topilmadi", status_code=404)
     
@@ -281,4 +278,36 @@ def proxy_stream(index: int):
     if not stream_url:
         return Response("Stream URL yaratib bo'lmadi", status_code=500)
 
-    return RedirectResponse(url=stream_url, status_code=302)
+    # Вместо редиректа делаем честное проксирование потока через StreamingResponse
+    try:
+        upstream_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "*/*"
+        }
+        
+        # Пробрасываем заголовок Range, если плеер его запрашивает (важно для буферизации)
+        range_header = request.headers.get("range")
+        if range_header:
+            upstream_headers["Range"] = range_header
+
+        req = requests.get(stream_url, headers=upstream_headers, stream=True, timeout=10)
+        
+        # Если провайдер вернул ошибку
+        if req.status_code >= 400 and req.status_code != 206:
+            return Response(f"Upstream error: {req.status_code}", status_code=req.status_code)
+
+        excluded_headers = ["content-encoding", "transfer-encoding", "connection"]
+        response_headers = {
+            key: value for key, value in req.headers.items()
+            if key.lower() not in excluded_headers
+        }
+        response_headers["Access-Control-Allow-Origin"] = "*"
+
+        return StreamingResponse(
+            req.iter_content(chunk_size=65536),
+            status_code=req.status_code,
+            headers=response_headers,
+            media_type=req.headers.get("content-type", "video/mp2t")
+        )
+    except Exception as e:
+        return Response(f"Proxy error: {e}", status_code=500)
