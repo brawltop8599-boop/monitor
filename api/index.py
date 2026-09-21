@@ -40,16 +40,12 @@ def get_session():
     session.cookies.set("stb_lang", "en", domain="app.ttt5.me")
     session.cookies.set("timezone", "Europe/London", domain="app.ttt5.me")
 
-    try:
-        session.get("http://app.ttt5.me/stalker_portal/c/", timeout=3)
-    except Exception as e:
-        print(f"Index load warning: {e}")
-
     token = ""
     random_val = "f113bcdf5643a1304e51821e196324694cc63b63"
+    
     try:
-        hs_url = "http://app.ttt5.me/stalker_portal/server/load.php?type=stb&action=handshake&token=&JsHttpRequest=1-xml"
-        r = session.get(hs_url, timeout=5).json()
+        hs_url = f"{PORTAL_URL}?type=stb&action=handshake&token=&JsHttpRequest=1-xml"
+        r = session.get(hs_url, timeout=4).json()
         js_data = r.get("js", {})
         token = js_data.get("token", "")
         random_val = js_data.get("random", random_val)
@@ -58,8 +54,9 @@ def get_session():
             session.cookies.set("token", token, domain="app.ttt5.me")
             session.headers.update({"Authorization": f"Bearer {token}"})
     except Exception as e:
-        print(f"Handshake warning: {e}")
+        print(f"Handshake error: {e}")
 
+    # Сразу шлем профиль с токеном
     metrics_data = json.dumps({
         "type": "stb", "model": "MAG254", "mac": MAC_BASE,
         "sn": "0407B4BF76218", "uid": "5E1285BD5AF191EC376A28D7E5A1715CEB1AD52D1401D4AB63FDA492DB92D792",
@@ -72,22 +69,20 @@ def get_session():
         f"&metrics={metrics_data}&timestamp={int(time.time())}"
     )
     try:
-        session.get(prof_url, timeout=5)
+        session.get(prof_url, timeout=4)
     except Exception as e:
-        print(f"Get profile warning: {e}")
+        print(f"Profile error: {e}")
 
     return session
 
 def fetch_channels_data(session):
     channels = []
     
-    # 1. Пробуем get_all_channels
     try:
         channels_url = f"{PORTAL_URL}?type=itv&action=get_all_channels&JsHttpRequest=1-xml"
-        res = session.get(channels_url, timeout=10)
-        print("--- GET_ALL_CHANNELS RESPONSE ---")
-        print("Status:", res.status_code)
-        print("Body text:", res.text[:500]) # Выведем первые 500 символов ответа в лог
+        res = session.get(channels_url, timeout=8)
+        print("GET ALL CHANNELS STATUS:", res.status_code)
+        print("RESPONSE BODY:", res.text[:300]) # Выведет первые 300 символов ответа в логи Vercel
         
         channels_res = res.json()
         js_field = channels_res.get("js")
@@ -96,28 +91,11 @@ def fetch_channels_data(session):
         elif isinstance(js_field, dict):
             channels = js_field.get("data", js_field.get("channels", []))
     except Exception as e:
-        print(f"get_all_channels error: {e}")
-
-    # 2. Если первый способ пустой, пробуем get_ordered_list
-    if not channels:
-        try:
-            list_url = f"{PORTAL_URL}?type=itv&action=get_ordered_list&genre=*&sortby=number&order=asc&JsHttpRequest=1-xml"
-            res = session.get(list_url, timeout=10)
-            print("--- GET_ORDERED_LIST RESPONSE ---")
-            print("Status:", res.status_code)
-            print("Body text:", res.text[:500])
-            
-            res_json = res.json()
-            js_field = res_json.get("js")
-            if isinstance(js_field, list):
-                channels = js_field
-            elif isinstance(js_field, dict):
-                channels = js_field.get("data", [])
-        except Exception as e:
-            print(f"get_ordered_list error: {e}")
+        print(f"fetch_channels_data error: {e}")
 
     print(f"Total raw channels fetched: {len(channels)}")
     return channels
+    
 def load_or_update_playlist():
     if os.path.exists(PLAYLIST_FILE):
         if (time.time() - os.path.getmtime(PLAYLIST_FILE)) < 3600:
