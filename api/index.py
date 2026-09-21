@@ -42,8 +42,8 @@ def get_session():
 
     try:
         session.get("http://app.ttt5.me/stalker_portal/c/", timeout=3)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Index load warning: {e}")
 
     token = ""
     random_val = "f113bcdf5643a1304e51821e196324694cc63b63"
@@ -57,8 +57,8 @@ def get_session():
         if token:
             session.cookies.set("token", token, domain="app.ttt5.me")
             session.headers.update({"Authorization": f"Bearer {token}"})
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Handshake warning: {e}")
 
     metrics_data = json.dumps({
         "type": "stb", "model": "MAG254", "mac": MAC_BASE,
@@ -73,34 +73,47 @@ def get_session():
     )
     try:
         session.get(prof_url, timeout=5)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Get profile warning: {e}")
 
     return session
 
 def fetch_channels_data(session):
     channels = []
+    
+    # 1. Пробуем get_all_channels
     try:
         channels_url = f"{PORTAL_URL}?type=itv&action=get_all_channels&JsHttpRequest=1-xml"
-        channels_res = session.get(channels_url, timeout=8).json()
-        data = channels_res.get("js", {}).get("data", [])
-        if isinstance(data, list):
-            channels = data
-    except Exception:
-        pass
+        res = session.get(channels_url, timeout=10)
+        print("get_all_channels status:", res.status_code)
+        channels_res = res.json()
+        
+        # Различные варианты структуры ответа Stalker API
+        js_field = channels_res.get("js")
+        if isinstance(js_field, list):
+            channels = js_field
+        elif isinstance(js_field, dict):
+            channels = js_field.get("data", js_field.get("channels", []))
+    except Exception as e:
+        print(f"get_all_channels error: {e}")
 
+    # 2. Если первый способ не сработал, пробуем get_ordered_list
     if not channels:
         try:
             list_url = f"{PORTAL_URL}?type=itv&action=get_ordered_list&genre=*&sortby=number&order=asc&JsHttpRequest=1-xml"
-            res = session.get(list_url, timeout=8).json()
-            data = res.get("js", {}).get("data", [])
-            if not data and isinstance(res.get("js"), list):
-                data = res.get("js", [])
-            if isinstance(data, list):
-                channels = data
-        except Exception:
-            pass
+            res = session.get(list_url, timeout=10)
+            print("get_ordered_list status:", res.status_code)
+            res_json = res.json()
+            
+            js_field = res_json.get("js")
+            if isinstance(js_field, list):
+                channels = js_field
+            elif isinstance(js_field, dict):
+                channels = js_field.get("data", [])
+        except Exception as e:
+            print(f"get_ordered_list error: {e}")
 
+    print(f"Total raw channels fetched: {len(channels)}")
     return channels
 
 def load_or_update_playlist():
@@ -108,7 +121,9 @@ def load_or_update_playlist():
         if (time.time() - os.path.getmtime(PLAYLIST_FILE)) < 3600:
             try:
                 with open(PLAYLIST_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    if data:
+                        return data
             except Exception:
                 pass
 
@@ -124,21 +139,22 @@ def load_or_update_playlist():
         if logo and not logo.startswith("http"):
             logo = f"http://app.ttt5.me/stalker_portal/misc/logos/{logo}"
 
-        group_title = ch.get("genre_title", "Umumiy")
+        group_title = ch.get("genre_title", ch.get("tv_genre_id", "Umumiy"))
 
         if cmd:
             channels_list.append({
                 "name": ch_name,
                 "cmd": cmd,
-                "group": group_title,
+                "group": str(group_title),
                 "logo": logo
             })
 
-    try:
-        with open(PLAYLIST_FILE, "w", encoding="utf-8") as f:
-            json.dump(channels_list, f, ensure_ascii=False, indent=4)
-    except Exception:
-        pass
+    if channels_list:
+        try:
+            with open(PLAYLIST_FILE, "w", encoding="utf-8") as f:
+                json.dump(channels_list, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Cache save error: {e}")
             
     return channels_list
 
@@ -254,7 +270,7 @@ def proxy_stream(index: int, request: Request):
         link_url = f"{PORTAL_URL}?type=itv&action=create_link&cmd={requests.utils.quote(clean_cmd)}&JsHttpRequest=1-xml"
         link_res = session.get(link_url, timeout=5).json()
         
-        stream_cmd = link_res.get("js", {}).get("cmd")
+        stream_cmd = link_res.get("js", {}).get("cmd") or link_res.get("js", {}).get("url")
         if stream_cmd:
             stream_url = stream_cmd
             for prefix in ["ffmpeg ", "ch:ffrt ", "ffrt ", "ch:"]:
@@ -278,21 +294,18 @@ def proxy_stream(index: int, request: Request):
     if not stream_url:
         return Response("Stream URL yaratib bo'lmadi", status_code=500)
 
-    # Вместо редиректа делаем честное проксирование потока через StreamingResponse
     try:
         upstream_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "*/*"
         }
         
-        # Пробрасываем заголовок Range, если плеер его запрашивает (важно для буферизации)
         range_header = request.headers.get("range")
         if range_header:
             upstream_headers["Range"] = range_header
 
         req = requests.get(stream_url, headers=upstream_headers, stream=True, timeout=10)
         
-        # Если провайдер вернул ошибку
         if req.status_code >= 400 and req.status_code != 206:
             return Response(f"Upstream error: {req.status_code}", status_code=req.status_code)
 
