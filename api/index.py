@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-import threading
 import time
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
@@ -11,16 +10,6 @@ PORTAL_URL = "http://app.ttt5.me/stalker_portal/server/load.php"
 MAC_BASE = "00:1A:79:69:E5:45"
 
 app = FastAPI()
-
-status_data = {
-    "last_update": "Hali yangilanmagan",
-    "total_channels": 0,
-    "status": "Ishga tushmoqda...",
-}
-
-# Sessiyani xotirada saqlash uchun o'zgaruvchilar
-global_session = None
-session_created_time = 0
 
 def get_base_url(request: Request = None):
     if request:
@@ -34,11 +23,6 @@ def get_base_url(request: Request = None):
     return "http://localhost:8000"
 
 def get_session(force_new=False):
-    global global_session, session_created_time
-    
-    if not force_new and global_session and (time.time() - session_created_time) < 300:
-        return global_session
-
     session = requests.Session()
     headers = {
         "User-Agent": (
@@ -112,8 +96,6 @@ def get_session(force_new=False):
     except Exception:
         pass
 
-    global_session = session
-    session_created_time = time.time()
     return session
 
 def fetch_channels_data(session):
@@ -172,16 +154,20 @@ def fetch_channels_data(session):
 
     return channels, genres_map
 
-def update_playlist():
-    global status_data
-    status_data["status"] = "Yangilanmoqda..."
+def load_or_update_playlist():
+    final_file = "playlist.json"
+    
+    # Agar fayl oxirgi 1 soat ichida yaratilgan bo'lsa, qayta yuklamaymiz (tez ishlashi uchun)
+    if os.path.exists(final_file):
+        if (time.time() - os.path.getmtime(final_file)) < 3600:
+            try:
+                with open(final_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
 
-    session = get_session(force_new=False)
+    session = get_session()
     channels, genres_map = fetch_channels_data(session)
-
-    if not channels:
-        session = get_session(force_new=True)
-        channels, genres_map = fetch_channels_data(session)
 
     channels_list = []
     for ch in channels:
@@ -203,34 +189,11 @@ def update_playlist():
                 "logo": logo
             })
 
-    temp_file = "playlist.tmp"
-    final_file = "playlist.json"
-
-    with open(temp_file, "w", encoding="utf-8") as f:
-        json.dump(channels_list, f, ensure_ascii=False, indent=4)
-
-    if os.path.exists(final_file):
-        os.remove(final_file)
-    os.rename(temp_file, final_file)
-
-    status_data["last_update"] = time.strftime(
-        "%Y-%m-%d %H:%M:%S", time.localtime()
-    )
-    status_data["total_channels"] = len(channels_list)
-    status_data["status"] = "Muvaffaqiyatli ishlayapti ✅" if len(channels_list) > 0 else "Kanal topilmadi ⚠️"
-
-def background_worker():
-    while True:
-        try:
-            update_playlist()
-        except Exception as e:
-            print(f"Xatolik: {e}")
-        time.sleep(300)
-
-@app.on_event("startup")
-def startup_event():
-    t = threading.Thread(target=background_worker, daemon=True)
-    t.start()
+    if channels_list:
+        with open(final_file, "w", encoding="utf-8") as f:
+            json.dump(channels_list, f, ensure_ascii=False, indent=4)
+            
+    return channels_list
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -238,6 +201,17 @@ async def favicon():
 
 @app.get("/", response_class=HTMLResponse)
 def admin_panel():
+    channels = []
+    if os.path.exists("playlist.json"):
+        try:
+            with open("playlist.json", "r", encoding="utf-8") as f:
+                channels = json.load(f)
+        except Exception:
+            pass
+            
+    total = len(channels)
+    last_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime("playlist.json"))) if os.path.exists("playlist.json") else "Hali yo'q"
+
     return f"""
     <!DOCTYPE html>
     <html lang="uz">
@@ -250,21 +224,30 @@ def admin_panel():
             .badge {{ background: #22c55e; color: white; padding: 5px 12px; border-radius: 20px; font-weight: bold; }}
             a {{ color: #38bdf8; text-decoration: none; display: block; margin-top: 15px; font-size: 18px; }}
             a:hover {{ text-decoration: underline; }}
+            .btn {{ background: #3b82f6; color: white; padding: 10px 20px; border-radius: 6px; display: inline-block; margin-top: 15px; }}
         </style>
     </head>
     <body>
         <div class="card">
             <h2>🚀 IPTV Proxy Admin Panel</h2>
-            <p>Holati: <span class="badge">{status_data["status"]}</span></p>
-            <p><b>Kanallar soni:</b> {status_data["total_channels"]} ta</p>
-            <p><b>Oxirgi yangilangan vaqt:</b> {status_data["last_update"]}</p>
+            <p>Holati: <span class="badge">Aktiv va Tayyor ✅</span></p>
+            <p><b>Kanallar soni:</b> {total} ta</p>
+            <p><b>Oxirgi yangilangan vaqt:</b> {last_time}</p>
             <hr style="border: 0.5px solid #334155; margin: 20px 0;">
             <a href="/pl.m3u8" target="_blank">📥 M3U Playlist (/pl.m3u8)</a>
             <a href="/playlist.json" target="_blank" style="color: #94a3b8; font-size: 14px;">📄 JSON ni ko'rish (/playlist.json)</a>
+            <a href="/refresh" class="btn">🔄 Kanallarni Yangilash</a>
         </div>
     </body>
     </html>
     """
+
+@app.get("/refresh")
+def force_refresh():
+    if os.path.exists("playlist.json"):
+        os.remove("playlist.json")
+    load_or_update_playlist()
+    return RedirectResponse(url="/", status_code=302)
 
 @app.get("/health")
 def health_check():
@@ -272,9 +255,8 @@ def health_check():
 
 @app.get("/playlist.json")
 def download_json(request: Request):
-    if os.path.exists("playlist.json"):
-        with open("playlist.json", "r", encoding="utf-8") as f:
-            channels = json.load(f)
+    channels = load_or_update_playlist()
+    if channels:
         base_url = get_base_url(request)
         result = []
         for index, ch in enumerate(channels):
@@ -285,18 +267,13 @@ def download_json(request: Request):
                 "url": f"{base_url}/stream/{index}"
             })
         return result
-    return JSONResponse(content={"error": "Hali playlist tayyor emas!"}, status_code=404)
+    return JSONResponse(content={"error": "Kanal topilmadi yoki portal javob bermadi!"}, status_code=404)
 
 @app.get("/pl.m3u8", response_class=PlainTextResponse)
 def download_m3u8(request: Request):
-    if not os.path.exists("playlist.json"):
-        return "#EXTM3U\n# Xatolik: Playlist hali tayyorlanmadi"
-
-    try:
-        with open("playlist.json", "r", encoding="utf-8") as f:
-            channels = json.load(f)
-    except Exception:
-        return "#EXTM3U\n# Xatolik: Playlistni o'qib bo'lmadi"
+    channels = load_or_update_playlist()
+    if not channels:
+        return "#EXTM3U\n# Xatolik: Kanal topilmadi yoki portal javob bermadi"
 
     base_url = get_base_url(request)
     m3u_lines = ["#EXTM3U"]
