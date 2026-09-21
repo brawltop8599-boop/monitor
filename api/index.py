@@ -77,25 +77,33 @@ def get_session():
 
 def fetch_channels_data(session):
     channels = []
+    debug_body = ""
     
     try:
         channels_url = f"{PORTAL_URL}?type=itv&action=get_all_channels&JsHttpRequest=1-xml"
-        res = session.get(channels_url, timeout=8)
-        print("GET ALL CHANNELS STATUS:", res.status_code)
-        print("RESPONSE BODY:", res.text[:300]) # Выведет первые 300 символов ответа в логи Vercel
+        res = session.get(channels_url, timeout=10)
+        debug_body = res.text[:400] # Сохраняем кусок ответа для отладки
         
-        channels_res = res.json()
-        js_field = channels_res.get("js")
-        if isinstance(js_field, list):
-            channels = js_field
-        elif isinstance(js_field, dict):
-            channels = js_field.get("data", js_field.get("channels", []))
+        # Проверяем, действительно ли пришел JSON (а не HTML-ошибка)
+        if res.status_code == 200 and res.text.strip().startswith("{"):
+            channels_res = res.json()
+            js_field = channels_res.get("js")
+            if isinstance(js_field, list):
+                channels = js_field
+            elif isinstance(js_field, dict):
+                channels = js_field.get("data", js_field.get("channels", []))
     except Exception as e:
-        print(f"fetch_channels_data error: {e}")
+        debug_body = f"JSON Parse Exception: {str(e)}"
 
-    print(f"Total raw channels fetched: {len(channels)}")
-    return channels
-    
+    if not channels:
+        # Сохраняем текст ответа сервера в файл отладки
+        try:
+            with open(PLAYLIST_FILE + ".debug", "w", encoding="utf-8") as f:
+                f.write(f"Status 200 but not JSON. Body start: {debug_body}")
+        except Exception:
+            pass
+
+    return channels    
 def load_or_update_playlist():
     if os.path.exists(PLAYLIST_FILE):
         if (time.time() - os.path.getmtime(PLAYLIST_FILE)) < 3600:
