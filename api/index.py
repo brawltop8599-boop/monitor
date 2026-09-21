@@ -85,10 +85,11 @@ def fetch_channels_data(session):
     try:
         channels_url = f"{PORTAL_URL}?type=itv&action=get_all_channels&JsHttpRequest=1-xml"
         res = session.get(channels_url, timeout=10)
-        print("get_all_channels status:", res.status_code)
-        channels_res = res.json()
+        print("--- GET_ALL_CHANNELS RESPONSE ---")
+        print("Status:", res.status_code)
+        print("Body text:", res.text[:500]) # Выведем первые 500 символов ответа в лог
         
-        # Различные варианты структуры ответа Stalker API
+        channels_res = res.json()
         js_field = channels_res.get("js")
         if isinstance(js_field, list):
             channels = js_field
@@ -97,14 +98,16 @@ def fetch_channels_data(session):
     except Exception as e:
         print(f"get_all_channels error: {e}")
 
-    # 2. Если первый способ не сработал, пробуем get_ordered_list
+    # 2. Если первый способ пустой, пробуем get_ordered_list
     if not channels:
         try:
             list_url = f"{PORTAL_URL}?type=itv&action=get_ordered_list&genre=*&sortby=number&order=asc&JsHttpRequest=1-xml"
             res = session.get(list_url, timeout=10)
-            print("get_ordered_list status:", res.status_code)
-            res_json = res.json()
+            print("--- GET_ORDERED_LIST RESPONSE ---")
+            print("Status:", res.status_code)
+            print("Body text:", res.text[:500])
             
+            res_json = res.json()
             js_field = res_json.get("js")
             if isinstance(js_field, list):
                 channels = js_field
@@ -115,7 +118,6 @@ def fetch_channels_data(session):
 
     print(f"Total raw channels fetched: {len(channels)}")
     return channels
-
 def load_or_update_playlist():
     if os.path.exists(PLAYLIST_FILE):
         if (time.time() - os.path.getmtime(PLAYLIST_FILE)) < 3600:
