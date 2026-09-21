@@ -108,10 +108,35 @@ def load_or_update_playlist():
                 pass
 
     session = get_session()
-    raw_channels = fetch_channels_data(session)
+    
+    # Отладочный запрос с перехватом текста ответа
+    channels = []
+    debug_info = ""
+    try:
+        channels_url = f"{PORTAL_URL}?type=itv&action=get_all_channels&JsHttpRequest=1-xml"
+        res = session.get(channels_url, timeout=10)
+        debug_info = f"Status: {res.status_code}, Body: {res.text[:400]}"
+        
+        channels_res = res.json()
+        js_field = channels_res.get("js")
+        if isinstance(js_field, list):
+            channels = js_field
+        elif isinstance(js_field, dict):
+            channels = js_field.get("data", js_field.get("channels", []))
+    except Exception as e:
+        debug_info = f"Exception: {str(e)}"
+
+    if not channels:
+        # Сохраним отладочную информацию во временный файл, чтобы вернуть ее клиенту
+        try:
+            with open(PLAYLIST_FILE + ".debug", "w", encoding="utf-8") as f:
+                f.write(debug_info)
+        except Exception:
+            pass
+        return []
 
     channels_list = []
-    for ch in raw_channels:
+    for ch in channels:
         ch_name = ch.get("name", "Kanal")
         cmd = ch.get("cmd", "")
         
@@ -133,11 +158,11 @@ def load_or_update_playlist():
         try:
             with open(PLAYLIST_FILE, "w", encoding="utf-8") as f:
                 json.dump(channels_list, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            print(f"Cache save error: {e}")
+        except Exception:
+            pass
             
     return channels_list
-
+    
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return Response(status_code=204)
@@ -209,7 +234,14 @@ def download_json(request: Request):
 def download_m3u8(request: Request):
     channels = load_or_update_playlist()
     if not channels:
-        return "#EXTM3U\n# Xatolik: Kanal topilmadi"
+        debug_msg = "Kanal topilmadi"
+        if os.path.exists(PLAYLIST_FILE + ".debug"):
+            try:
+                with open(PLAYLIST_FILE + ".debug", "r", encoding="utf-8") as f:
+                    debug_msg = f.read()
+            except Exception:
+                pass
+        return f"#EXTM3U\n# Xatolik: {debug_msg}"
 
     base_url = get_base_url(request)
     m3u_lines = ["#EXTM3U"]
@@ -224,7 +256,7 @@ def download_m3u8(request: Request):
         m3u_lines.append(stream_link)
 
     return "\n".join(m3u_lines)
-
+    
 @app.get("/stream/{index}")
 def proxy_stream(index: int, request: Request):
     if not os.path.exists(PLAYLIST_FILE):
