@@ -196,7 +196,7 @@ def admin_panel():
             <p><b>Kanal:</b> {status_data["total_channels"]} ta</p>
             <p><b>Oxirgi yangilangan vaqt:</b> {status_data["last_update"]}</p>
             <hr style="border: 0.5px solid #334155; margin: 20px 0;">
-            <a href="https://ksiomi-redmi.hf.space" target="_blank">TEST ADMIN</a>
+            <a href="http://rebrand.ly/TvZaTak" target="_blank">TEST ADMIN</a>
         </div>
     </body>
     </html>
@@ -245,3 +245,8 @@ def download_m3u8():
         m3u_lines.append(url)
 
     return "\n".join(m3u_lines)
+from fastapi.responses import Response
+
+@app.get('/favicon.ico', include_in_schema=False)
+async def favicon():
+    return Response(content=b'', media_type='image/vnd.microsoft.icon')
