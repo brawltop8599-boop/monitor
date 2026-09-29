@@ -1,202 +1,262 @@
 import hashlib
 import json
 import os
+import threading
 import time
-from fastapi import FastAPI, Response, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi import FastAPI, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 import requests
 
-PORTAL_URL = "http://app.ttt5.me/stalker_portal/server/load.php"
-PORTAL_BASE = "http://app.ttt5.me"
-
-MAC_BASE = "00:1A:79:67:D2:D4"
-SN_BASE = "E64E3F8B8C092"
-UID_BASE = "D19D40486081779F90A66F60EB9836A1D2A63ED493961445338D76A01F31F6D4"
-DEVICE_ID = "20FB21AA77D58B6DC9200101EED68B82C4350765274BC3373EA9758DC8F3EA9E"
-
-# Укажите ваш домен на Vercel (например: https://your-project.vercel.app)
-BASE_PROXY_URL = "https://blacktulipstav.onrender.com" 
-SECRET_KEY = "TvZaTak"
-TELEGRAM_GROUP_URL = "https://t.me/+2lWVU6CKQsVkMWRi"  
+PORTAL_URL = "http://portal.wisp.cat/stalker_portal/server/load.php"
+MAC_BASE = "00:1A:79:65:7B:01"
+BASE_PROXY_URL = "https://stream-tv-digital.hf.space"
 
 app = FastAPI()
 
-# В памяти для Serverless
-memory_cache = {
-    "channels": [],
-    "genres": {},
-    "last_update": 0
+status_data = {
+    "last_update": "Hali yangilanmagan",
+    "total_channels": 1,
+    "status": "Ishga tushmoqda...",
 }
-
 def get_session():
     session = requests.Session()
     headers = {
-        "User-Agent": "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 2 rev: 250 Safari/533.3",
+        "User-Agent": (
+            "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like"
+            " Gecko) MAG200 stbapp ver: 2 rev: 250 Safari/533.3"
+        ),
         "X-User-Agent": "Model: MAG250; Link: WiFi",
-        "Referer": "http://app.ttt5.me/stalker_portal/c/index.html",
+        "Referer": "http://portal.wisp.cat/stalker_portal/c/index.html",
         "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate",
         "Connection": "close",
+        "Pragma": "no-cache",
     }
     session.headers.update(headers)
-    session.cookies.set("mac", MAC_BASE, domain="app.ttt5.me")
-    session.cookies.set("stb_lang", "en", domain="app.ttt5.me")
-    session.cookies.set("timezone", "Europe/London", domain="app.ttt5.me")
+    session.cookies.set("mac", MAC_BASE, domain="portal.wisp.cat")
+    session.cookies.set("stb_lang", "en", domain="portal.wisp.cat")
+    session.cookies.set("timezone", "Europe/London", domain="portal.wisp.cat")
 
+    # 1. Portal slug primary
     try:
-        session.get("http://app.ttt5.me/stalker_portal/c/", timeout=3)
+        session.get("http://portal.wisp.cat/stalker_portal/c/", timeout=5)
     except Exception:
         pass
 
+    # 2. Portal API discovery (xpcom.common.js)
+    try:
+        session.get(
+            "http://portal.wisp.cat/stalker_portal/c/xpcom.common.js", timeout=5
+        )
+    except Exception:
+        pass
+
+    # 3. Portal version (version.js)
+    try:
+        session.get(
+            "http://portal.wisp.cat/stalker_portal/c/version.js", timeout=5
+        )
+    except Exception:
+        pass
+
+    # 4. Handshake (Token olish)
     token = ""
     try:
-        hs_url = f"{PORTAL_URL}?type=stb&action=handshake&token=&JsHttpRequest=1-xml"
-        r = session.get(hs_url, timeout=5).json()
-        js_data = r.get("js", {})
-        token = js_data.get("token", "")
+        hs_url = (
+            "http://portal.wisp.cat/stalker_portal/server/load.php?type=stb&action=handshake&token=&JsHttpRequest=1-xml"
+        )
+        r = session.get(hs_url, timeout=10).json()
+        token = r.get("js", {}).get("token", "")
         if token:
-            session.cookies.set("token", token, domain="app.ttt5.me")
+            session.cookies.set("token", token, domain="portal.wisp.cat")
             session.headers.update({"Authorization": f"Bearer {token}"})
+    except Exception:
+        pass
+
+# 5. Profile full (Aniqlashtirilgan parametrlar)
+    metrics_data = json.dumps({
+        "type": "stb",
+        "model": "MAG254",
+        "mac": MAC_BASE,
+        "sn": "C29FF3A4A8F7B",
+        "uid": "662591BD155567306F4C764C06503277A88F46A33171F128147ABFD5BDEF3EF3",
+        "random": "b9a90b92ac722147751dbbf9a06fd3a6dec9c08f"
+    })
+
+    token_param = f"&token={token}" if token else ""
+    prof_url = (
+        f"{PORTAL_URL}?type=stb&action=get_profile&JsHttpRequest=1-xml&hd=1"
+        f"{token_param}"
+        "&ver=ImageDescription: 0.2.18-r23-250; ImageDate: Thu Sep 13 11:31:16 EEST 2018; PORTAL version: 5.3.0; API Version: JS API version: 343; STB API version: 146; Player Engine version: 0x58c"
+        "&num_banks=2&sn=C29FF3A4A8F7B&stb_type=MAG250&client_type=STB&image_version=218&video_out=hdmi"
+        "&device_id=ED8631D5017C0DC1C1F6EF359AED6D2A894486F6D12876E3BE38B9A377953846"
+        "&device_id2=ED8631D5017C0DC1C1F6EF359AED6D2A894486F6D12876E3BE38B9A377953846"
+        "&signature=02D90DC0532B449B16E8DC52B55521F8823B0FDD8B7C09D80930627FBF4EC212"
+        "&auth_second_step=1&hw_version=1.7-BD-00&not_valid_token=0"
+        f"&metrics={metrics_data}"
+        f"&hw_version_2=df793726342adb400f308f1c587784ae29c4f28a&timestamp={int(time.time())}&api_signature=262&prehash=1bef54600c63cfdc086dad053d447f3ade6e628f"
+    )
+    
+    try:
+        session.get(prof_url, timeout=10)
+    except Exception:
+        pass
+
+    # 6. Account information
+    try:
+        acc_url = f"{PORTAL_URL}?type=account_info&action=get_main_info&JsHttpRequest=1-xml"
+        session.get(acc_url, timeout=10)
     except Exception:
         pass
 
     return session
 
-def load_channels_cached():
-    # Кэшируем на 5 минут в памяти экземпляра функции
-    if time.time() - memory_cache["last_update"] < 300 and memory_cache["channels"]:
-        return memory_cache["channels"], memory_cache["genres"]
+
+def update_playlist():
+    global status_data
+    status_data["status"] = "Yangilanmoqda..."
 
     session = get_session()
-    genres_map = {}
-    try:
-        g_resp = session.get(f"{PORTAL_URL}?type=itv&action=get_genres&JsHttpRequest=1-xml", timeout=5).json()
-        for g in g_resp.get("js", []):
-            if g.get("id") is not None:
-                genres_map[str(g.get("id"))] = g.get("title", "Umumiy")
-    except Exception:
-        pass
+    channels_url = (
+        f"{PORTAL_URL}?type=itv&action=get_all_channels&JsHttpRequest=1-xml"
+    )
 
     channels = []
-    try:
-        res = session.get(f"{PORTAL_URL}?type=itv&action=get_all_channels&JsHttpRequest=1-xml", timeout=6).json()
-        data = res.get("js", {}).get("data", [])
-        if isinstance(data, list):
-            channels = data
-    except Exception:
-        pass
+    for _ in range(2):
+        try:
+            channels_res = session.get(channels_url, timeout=10).json()
+            channels = channels_res.get("js", {}).get("data", [])
+            if channels:
+                break
+        except Exception:
+            time.sleep(1)
 
     if not channels:
+        cmd = "ffmpeg http://lb.wisp.cat/lb0/5kanalHDUA/video.m3u8"
+        ch_name = "5 Kanal HD"
+    else:
+        target_channel = channels[0]
+        ch_name = target_channel.get("name", "Kanal")
+        cmd = target_channel.get(
+            "cmd", "ffmpeg http://lb.wisp.cat/lb0/5kanalHDUA/video.m3u8"
+        )
+
+    temp_file = "playlist.tmp"
+    final_file = "playlist.json"
+
+    success = False
+    stream_url = None
+
+    for attempt in range(2):
         try:
-            res = session.get(f"{PORTAL_URL}?type=itv&action=get_ordered_list&genre=*&sortby=number&order=asc&JsHttpRequest=1-xml", timeout=6).json()
-            data = res.get("js", {}).get("data", [])
-            if isinstance(data, list):
-                channels = data
+            time.sleep(0.2)
+            link_url = f"{PORTAL_URL}?type=itv&action=create_link&cmd={requests.utils.quote(cmd)}&JsHttpRequest=1-xml"
+            link_res = session.get(link_url, timeout=10).json()
+            stream_cmd = link_res.get("js", {}).get("cmd")
+
+            if stream_cmd:
+                if stream_cmd.startswith("ffmpeg "):
+                    stream_url = stream_cmd.replace("ffmpeg ", "").strip()
+                else:
+                    stream_url = stream_cmd
+                success = True
+                break
         except Exception:
-            pass
+            session = get_session()
 
-    channels_list = []
-    for ch in channels:
-        logo = ch.get("logo", "")
-        if logo and not logo.startswith("http"):
-            logo = f"http://app.ttt5.me/stalker_portal/misc/logos/{logo}"
-        
-        genre_id = str(ch.get("tv_genre_id", ch.get("genre_id", "")))
-        channels_list.append({
-            "name": ch.get("name", "Kanal"),
-            "cmd": ch.get("cmd", ""),
-            "group": genres_map.get(genre_id, "Umumiy"),
-            "logo": logo
-        })
+    if not success or not stream_url:
+        stream_url = (
+            cmd.replace("ffmpeg ", "").replace("ch:ffrt ", "").strip()
+            if "http" in cmd
+            else "http://lb.wisp.cat/lb0/5kanalHDUA/video.m3u8"
+        )
 
-    if channels_list:
-        memory_cache["channels"] = channels_list
-        memory_cache["genres"] = genres_map
-        memory_cache["last_update"] = time.time()
+    channels_list = [{"name": ch_name, "url": stream_url}]
 
-    return channels_list, genres_map
+    with open(temp_file, "w", encoding="utf-8") as f:
+        json.dump(channels_list, f, ensure_ascii=False, indent=4)
 
-@app.get("/", response_class=RedirectResponse)
-def root_redirect():
-    return RedirectResponse(url=TELEGRAM_GROUP_URL, status_code=302)
+    if os.path.exists(final_file):
+        os.remove(final_file)
+    os.rename(temp_file, final_file)
 
+    status_data["last_update"] = time.strftime(
+        "%Y-%m-%d %H:%M:%S", time.localtime()
+    )
+    status_data["status"] = "Muvaffaqiyatli"
+
+
+def background_worker():
+    while True:
+        try:
+            update_playlist()
+        except Exception as e:
+            print(f"Xatolik: {e}")
+        time.sleep(15)
+
+
+@app.on_event("startup")
+def startup_event():
+    t = threading.Thread(target=background_worker, daemon=True)
+    t.start()
+@app.get("/", response_class=HTMLResponse)
+def admin_panel():
+    return f"""
+    <!DOCTYPE html>
+    <html lang="uz">
+    <head>
+        <meta charset="UTF-8">
+        <title>Admin Panel</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; padding: 50px; }}
+            .card {{ background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }}
+            .badge {{ background: #22c55e; color: white; padding: 5px 12px; border-radius: 20px; font-weight: bold; }}
+            a {{ color: #38bdf8; text-decoration: none; display: block; margin-top: 15px; font-size: 18px; }}
+            a:hover {{ text-decoration: underline; }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>Admin Panel</h2>
+            <p>Holati: <span class="badge">{status_data["status"]}</span></p>
+            <p><b>Kanal:</b> {status_data["total_channels"]} ta</p>
+            <p><b>Oxirgi yangilangan vaqt:</b> {status_data["last_update"]}</p>
+            <hr style="border: 0.5px solid #334155; margin: 20px 0;">
+            <a href="https://ksiomi-redmi.hf.space" target="_blank">TEST ADMIN</a>
+        </div>
+    </body>
+    </html>
+    """
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
-@app.get("/playlist.json")
-def download_json(key: str = ""):
-    if key != SECRET_KEY:
-        return [{"name": "Xato kalit", "group": "Stub", "url": "https://github.com/brawltop8599-boop/ads-stub/raw/refs/heads/main/v.mp4"}]
 
-    channels, _ = load_channels_cached()
-    result = []
-    for index, ch in enumerate(channels):
-        result.append({
-            "name": ch["name"],
-            "group": ch.get("group", "Umumiy"),
-            "logo": ch.get("logo", ""),
-            "url": f"{BASE_PROXY_URL}/ch/{index}?key={SECRET_KEY}"
-        })
-    return result
+@app.get("/playlist.json")
+def download_json():
+    if os.path.exists("playlist.json"):
+        with open("playlist.json", "r", encoding="utf-8") as f:
+            content = json.load(f)
+        return content
+    return {"error": "Hali playlist tayyor emas!"}, 404
+
 
 @app.get("/pl.m3u8", response_class=PlainTextResponse)
-@app.get("/playlist.m3u8", response_class=PlainTextResponse)
-def download_m3u8(key: str = ""):
-    headers = {"Content-Disposition": "attachment; filename=playlist.m3u8"}
-    if key != SECRET_KEY:
-        return PlainTextResponse("#EXTM3U\n#EXTINF:-1,Xato kalit\nhttps://github.com/brawltop8599-boop/ads-stub/raw/refs/heads/main/v.mp4", headers=headers)
+def download_m3u8():
+    if not os.path.exists("playlist.json"):
+        return "#EXTM3U\n# Xatolik: Playlist hali tayyorlanmadi"
 
-    channels, _ = load_channels_cached()
-    m3u_lines = ["#EXTM3U"]
-    for index, ch in enumerate(channels):
-        stream_link = f"{BASE_PROXY_URL}/ch/{index}?key={SECRET_KEY}"
-        m3u_lines.append(f"#EXTINF:-1 tvg-name=\"{ch['name']}\" group-title=\"{ch['group']}\",{ch['name']}")
-        m3u_lines.append(stream_link)
-
-    return PlainTextResponse("\n".join(m3u_lines), headers=headers)
-
-@app.get("/ch/{index}")
-def proxy_stream(index: int, key: str = ""):
-    if key != SECRET_KEY:
-        return RedirectResponse(url="https://github.com/brawltop8599-boop/ads-stub/raw/refs/heads/main/v.mp4", status_code=302)
-
-    channels, _ = load_channels_cached()
-    if index >= len(channels):
-        return Response("Kanal topilmadi", status_code=404)
-
-    cmd = channels[index].get("cmd", "")
-    session = get_session()
-    stream_url = ""
-    
     try:
-        clean_cmd = cmd
-        for prefix in ["ffmpeg ", "ch:ffrt ", "ffrt ", "ch:"]:
-            if clean_cmd.startswith(prefix):
-                clean_cmd = clean_cmd[len(prefix):].strip()
-                
-        link_url = f"{PORTAL_URL}?type=itv&action=create_link&cmd={requests.utils.quote(clean_cmd)}&JsHttpRequest=1-xml"
-        link_res = session.get(link_url, timeout=5).json()
-        stream_cmd = link_res.get("js", {}).get("cmd")
-        if stream_cmd:
-            stream_url = stream_cmd
-            for prefix in ["ffmpeg ", "ch:ffrt ", "ffrt ", "ch:"]:
-                if stream_url.startswith(prefix):
-                    stream_url = stream_url[len(prefix):].strip()
+        with open("playlist.json", "r", encoding="utf-8") as f:
+            channels = json.load(f)
     except Exception:
-        pass
+        return "#EXTM3U\n# Xatolik: Playlistni o'qib bo'lmadi"
 
-    if not stream_url or "://" not in stream_url:
-        stream_url = cmd
-        for prefix in ["ffmpeg ", "ch:ffrt ", "ffrt ", "ch:"]:
-            if stream_url.startswith(prefix):
-                stream_url = stream_url[len(prefix):].strip()
+    m3u_lines = ["#EXTM3U"]
+    for ch in channels:
+        name = ch.get("name", "Kanal")
+        url = ch.get("url", "")
+        m3u_lines.append(f"#EXTINF:-1,{name}")
+        m3u_lines.append(url)
 
-    if stream_url.startswith("/"):
-        stream_url = f"{PORTAL_BASE}{stream_url}"
-
-    if stream_url and "token=" not in stream_url:
-        tkn = session.cookies.get("token")
-        if tkn:
-            stream_url += ("&" if "?" in stream_url else "?") + f"token={tkn}"
-
-    return RedirectResponse(url=stream_url, status_code=302)
+    return "\n".join(m3u_lines)
