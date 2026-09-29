@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-import threading
 import time
 from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -16,8 +15,9 @@ app = FastAPI()
 status_data = {
     "last_update": "Hali yangilanmagan",
     "total_channels": 1,
-    "status": "Ishga tushmoqda...",
+    "status": "Kuting...",
 }
+
 def get_session():
     session = requests.Session()
     headers = {
@@ -37,34 +37,24 @@ def get_session():
     session.cookies.set("stb_lang", "en", domain="portal.wisp.cat")
     session.cookies.set("timezone", "Europe/London", domain="portal.wisp.cat")
 
-    # 1. Portal slug primary
     try:
         session.get("http://portal.wisp.cat/stalker_portal/c/", timeout=5)
     except Exception:
         pass
 
-    # 2. Portal API discovery (xpcom.common.js)
     try:
-        session.get(
-            "http://portal.wisp.cat/stalker_portal/c/xpcom.common.js", timeout=5
-        )
+        session.get("http://portal.wisp.cat/stalker_portal/c/xpcom.common.js", timeout=5)
     except Exception:
         pass
 
-    # 3. Portal version (version.js)
     try:
-        session.get(
-            "http://portal.wisp.cat/stalker_portal/c/version.js", timeout=5
-        )
+        session.get("http://portal.wisp.cat/stalker_portal/c/version.js", timeout=5)
     except Exception:
         pass
 
-    # 4. Handshake (Token olish)
     token = ""
     try:
-        hs_url = (
-            "http://portal.wisp.cat/stalker_portal/server/load.php?type=stb&action=handshake&token=&JsHttpRequest=1-xml"
-        )
+        hs_url = "http://portal.wisp.cat/stalker_portal/server/load.php?type=stb&action=handshake&token=&JsHttpRequest=1-xml"
         r = session.get(hs_url, timeout=10).json()
         token = r.get("js", {}).get("token", "")
         if token:
@@ -73,7 +63,6 @@ def get_session():
     except Exception:
         pass
 
-# 5. Profile full (Aniqlashtirilgan parametrlar)
     metrics_data = json.dumps({
         "type": "stb",
         "model": "MAG254",
@@ -102,7 +91,6 @@ def get_session():
     except Exception:
         pass
 
-    # 6. Account information
     try:
         acc_url = f"{PORTAL_URL}?type=account_info&action=get_main_info&JsHttpRequest=1-xml"
         session.get(acc_url, timeout=10)
@@ -111,15 +99,12 @@ def get_session():
 
     return session
 
-
 def update_playlist():
     global status_data
     status_data["status"] = "Yangilanmoqda..."
 
     session = get_session()
-    channels_url = (
-        f"{PORTAL_URL}?type=itv&action=get_all_channels&JsHttpRequest=1-xml"
-    )
+    channels_url = f"{PORTAL_URL}?type=itv&action=get_all_channels&JsHttpRequest=1-xml"
 
     channels = []
     for _ in range(2):
@@ -137,12 +122,10 @@ def update_playlist():
     else:
         target_channel = channels[0]
         ch_name = target_channel.get("name", "Kanal")
-        cmd = target_channel.get(
-            "cmd", "ffmpeg http://lb.wisp.cat/lb0/5kanalHDUA/video.m3u8"
-        )
+        cmd = target_channel.get("cmd", "ffmpeg http://lb.wisp.cat/lb0/5kanalHDUA/video.m3u8")
 
-    temp_file = "playlist.tmp"
-    final_file = "playlist.json"
+    temp_file = "/tmp/playlist.tmp"
+    final_file = "/tmp/playlist.json"
 
     success = False
     stream_url = None
@@ -180,27 +163,18 @@ def update_playlist():
         os.remove(final_file)
     os.rename(temp_file, final_file)
 
-    status_data["last_update"] = time.strftime(
-        "%Y-%m-%d %H:%M:%S", time.localtime()
-    )
+    status_data["last_update"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     status_data["status"] = "Muvaffaqiyatli"
 
-
-def background_worker():
-    while True:
-        try:
-            update_playlist()
-        except Exception as e:
-            print(f"Xatolik: {e}")
-        time.sleep(15)
-
-
-@app.on_event("startup")
-def startup_event():
-    t = threading.Thread(target=background_worker, daemon=True)
-    t.start()
 @app.get("/", response_class=HTMLResponse)
 def admin_panel():
+    # Автообновление плейлиста на лету, если его нет или прошло больше 60 секунд
+    if not os.path.exists("/tmp/playlist.json") or (time.time() - os.path.getmtime("/tmp/playlist.json") > 60):
+        try:
+            update_playlist()
+        except Exception:
+            pass
+
     return f"""
     <!DOCTYPE html>
     <html lang="uz">
@@ -227,27 +201,38 @@ def admin_panel():
     </body>
     </html>
     """
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
-
 @app.get("/playlist.json")
 def download_json():
-    if os.path.exists("playlist.json"):
-        with open("playlist.json", "r", encoding="utf-8") as f:
+    if not os.path.exists("/tmp/playlist.json") or (time.time() - os.path.getmtime("/tmp/playlist.json") > 60):
+        try:
+            update_playlist()
+        except Exception:
+            pass
+
+    if os.path.exists("/tmp/playlist.json"):
+        with open("/tmp/playlist.json", "r", encoding="utf-8") as f:
             content = json.load(f)
         return content
     return {"error": "Hali playlist tayyor emas!"}, 404
 
-
 @app.get("/pl.m3u8", response_class=PlainTextResponse)
 def download_m3u8():
-    if not os.path.exists("playlist.json"):
+    if not os.path.exists("/tmp/playlist.json") or (time.time() - os.path.getmtime("/tmp/playlist.json") > 60):
+        try:
+            update_playlist()
+        except Exception:
+            pass
+
+    if not os.path.exists("/tmp/playlist.json"):
         return "#EXTM3U\n# Xatolik: Playlist hali tayyorlanmadi"
 
     try:
-        with open("playlist.json", "r", encoding="utf-8") as f:
+        with open("/tmp/playlist.json", "r", encoding="utf-8") as f:
             channels = json.load(f)
     except Exception:
         return "#EXTM3U\n# Xatolik: Playlistni o'qib bo'lmadi"
