@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 import requests
 PORTAL_URL = "http://portal.wisp.cat/stalker_portal/server/load.php"
 MAC_BASE = "00:1A:79:65:7B:01"
-BASE_PROXY_URL = "https://stream-tv-digitalhf.space"
+BASE_PROXY_URL = "https://stream-tv-digital"
 app = FastAPI()
 status_data = {
     "last_update": "Hali yangilanmagan",
