@@ -5,19 +5,15 @@ import time
 from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 import requests
-
 PORTAL_URL = "http://portal.wisp.cat/stalker_portal/server/load.php"
 MAC_BASE = "00:1A:79:65:7B:01"
-BASE_PROXY_URL = "https://stream-tv-digital.hf.space"
-
+BASE_PROXY_URL = "https://stream-tv-digitalhf.space"
 app = FastAPI()
-
 status_data = {
     "last_update": "Hali yangilanmagan",
     "total_channels": 1,
     "status": "Kuting...",
 }
-
 def get_session():
     session = requests.Session()
     headers = {
@@ -62,7 +58,6 @@ def get_session():
             session.headers.update({"Authorization": f"Bearer {token}"})
     except Exception:
         pass
-
     metrics_data = json.dumps({
         "type": "stb",
         "model": "MAG254",
@@ -71,7 +66,6 @@ def get_session():
         "uid": "662591BD155567306F4C764C06503277A88F46A33171F128147ABFD5BDEF3EF3",
         "random": "b9a90b92ac722147751dbbf9a06fd3a6dec9c08f"
     })
-
     token_param = f"&token={token}" if token else ""
     prof_url = (
         f"{PORTAL_URL}?type=stb&action=get_profile&JsHttpRequest=1-xml&hd=1"
